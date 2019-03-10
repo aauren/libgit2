@@ -35,7 +35,7 @@ static void workdir_iterator_test(
 
 	g_repo = cl_git_sandbox_init(sandbox);
 
-	i_opts.flags = GIT_ITERATOR_DONT_AUTOEXPAND;
+	i_opts.flags = GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 	i_opts.start = start;
 	i_opts.end = end;
 
@@ -251,7 +251,7 @@ void test_iterator_workdir__builtin_ignores(void)
 	cl_git_pass(p_mkdir("attr/sub/sub/.git", 0777));
 	cl_git_mkfile("attr/sub/.git", "whatever");
 
-	i_opts.flags = GIT_ITERATOR_DONT_AUTOEXPAND;
+	i_opts.flags = GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 	i_opts.start = "dir";
 	i_opts.end = "sub/sub/file";
 
@@ -291,7 +291,7 @@ static void check_wd_first_through_third_range(
 	int error, idx;
 	static const char *expected[] = { "FIRST", "second", "THIRD", NULL };
 
-	i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+	i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 	i_opts.start = start;
 	i_opts.end = end;
 
@@ -343,18 +343,19 @@ void test_iterator_workdir__icase(void)
 	g_repo = cl_git_sandbox_init("icase");
 
 	/* auto expand with no tree entries */
+	i_opts.flags = GIT_ITERATOR_HONOR_IGNORES;
 	cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 	expect_iterator_items(i, 20, NULL, 20, NULL);
 	git_iterator_free(i);
 
 	/* auto expand with tree entries */
-	i_opts.flags = GIT_ITERATOR_INCLUDE_TREES;
+	i_opts.flags = GIT_ITERATOR_INCLUDE_TREES | GIT_ITERATOR_HONOR_IGNORES;
 	cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 	expect_iterator_items(i, 22, NULL, 22, NULL);
 	git_iterator_free(i);
 
 	/* no auto expand (implies trees included) */
-	i_opts.flags = GIT_ITERATOR_DONT_AUTOEXPAND;
+	i_opts.flags = GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 	cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 	expect_iterator_items(i, 12, NULL, 22, NULL);
 	git_iterator_free(i);
@@ -368,7 +369,7 @@ void test_iterator_workdir__icase_starts_and_ends(void)
 	g_repo = cl_git_sandbox_init("icase");
 
 	/* auto expand with no tree entries */
-	i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+	i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 	i_opts.start = "c";
 	i_opts.end = "k/D";
@@ -383,7 +384,8 @@ void test_iterator_workdir__icase_starts_and_ends(void)
 	git_iterator_free(i);
 
 	/* auto expand with tree entries */
-	i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_INCLUDE_TREES;
+	i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE |
+			GIT_ITERATOR_INCLUDE_TREES | GIT_ITERATOR_HONOR_IGNORES;
 
 	i_opts.start = "c";
 	i_opts.end = "k/D";
@@ -398,7 +400,8 @@ void test_iterator_workdir__icase_starts_and_ends(void)
 	git_iterator_free(i);
 
 	/* no auto expand (implies trees included) */
-	i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_DONT_AUTOEXPAND;
+	i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE |
+			GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 
 	i_opts.start = "c";
 	i_opts.end = "k/D";
@@ -413,7 +416,7 @@ void test_iterator_workdir__icase_starts_and_ends(void)
 	git_iterator_free(i);
 
 	/* auto expand with no tree entries */
-	i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+	i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 	i_opts.start = "c";
 	i_opts.end = "k/D";
@@ -428,7 +431,8 @@ void test_iterator_workdir__icase_starts_and_ends(void)
 	git_iterator_free(i);
 
 	/* auto expand with tree entries */
-	i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_INCLUDE_TREES;
+	i_opts.flags = GIT_ITERATOR_IGNORE_CASE |
+			GIT_ITERATOR_INCLUDE_TREES | GIT_ITERATOR_HONOR_IGNORES;
 
 	i_opts.start = "c";
 	i_opts.end = "k/D";
@@ -443,7 +447,8 @@ void test_iterator_workdir__icase_starts_and_ends(void)
 	git_iterator_free(i);
 
 	/* no auto expand (implies trees included) */
-	i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_DONT_AUTOEXPAND;
+	i_opts.flags = GIT_ITERATOR_IGNORE_CASE |
+			GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 
 	i_opts.start = "c";
 	i_opts.end = "k/D";
@@ -507,12 +512,13 @@ void test_iterator_workdir__depth(void)
 	build_workdir_tree("icase/dir02/sUB01", 50, 0);
 
 	/* auto expand with no tree entries */
+	iter_opts.flags = GIT_ITERATOR_HONOR_IGNORES;
 	cl_git_pass(git_iterator_for_workdir(&iter, g_repo, NULL, NULL, &iter_opts));
 	expect_iterator_items(iter, 125, NULL, 125, NULL);
 	git_iterator_free(iter);
 
 	/* auto expand with tree entries (empty dirs silently skipped) */
-	iter_opts.flags = GIT_ITERATOR_INCLUDE_TREES;
+	iter_opts.flags = GIT_ITERATOR_INCLUDE_TREES | GIT_ITERATOR_HONOR_IGNORES;
 	cl_git_pass(git_iterator_for_workdir(&iter, g_repo, NULL, NULL, &iter_opts));
 	expect_iterator_items(iter, 337, NULL, 337, NULL);
 	git_iterator_free(iter);
@@ -790,7 +796,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = NULL;
 		i_opts.end = NULL;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -805,7 +811,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = NULL;
 		i_opts.end = NULL;
-		i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -819,7 +825,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = "c";
 		i_opts.end = NULL;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -833,7 +839,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = "c";
 		i_opts.end = NULL;
-		i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -847,7 +853,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = NULL;
 		i_opts.end = "e";
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -861,7 +867,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = NULL;
 		i_opts.end = "e";
-		i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -875,7 +881,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = "c";
 		i_opts.end = "k/D";
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -889,7 +895,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = "k";
 		i_opts.end = "k/D";
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -903,7 +909,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = "c";
 		i_opts.end = "k/D";
-		i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -917,7 +923,7 @@ void test_iterator_workdir__pathlist(void)
 
 		i_opts.start = "k";
 		i_opts.end = "k/D";
-		i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -947,7 +953,7 @@ void test_iterator_workdir__pathlist_with_dirs(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -964,7 +970,7 @@ void test_iterator_workdir__pathlist_with_dirs(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -980,7 +986,7 @@ void test_iterator_workdir__pathlist_with_dirs(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		cl_git_fail_with(GIT_ITEROVER, git_iterator_advance(NULL, i));
@@ -997,7 +1003,7 @@ void test_iterator_workdir__pathlist_with_dirs(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1014,7 +1020,7 @@ void test_iterator_workdir__pathlist_with_dirs(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1076,7 +1082,7 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1101,7 +1107,7 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1142,7 +1148,7 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1174,7 +1180,7 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1209,7 +1215,7 @@ void test_iterator_workdir__bounded_submodules(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, index, head, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1226,7 +1232,7 @@ void test_iterator_workdir__bounded_submodules(void)
 
 		i_opts.pathlist.strings = (char **)filelist.contents;
 		i_opts.pathlist.count = filelist.length;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, index, head, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1242,7 +1248,7 @@ void test_iterator_workdir__bounded_submodules(void)
 		i_opts.end = "sm_changed_index";
 		i_opts.pathlist.strings = NULL;
 		i_opts.pathlist.count = 0;
-		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE;
+		i_opts.flags = GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, index, head, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1276,7 +1282,7 @@ void test_iterator_workdir__advance_over(void)
 	git_iterator_options i_opts = GIT_ITERATOR_OPTIONS_INIT;
 
 	i_opts.flags |= GIT_ITERATOR_DONT_IGNORE_CASE |
-		GIT_ITERATOR_DONT_AUTOEXPAND;
+		GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 
 	g_repo = cl_git_sandbox_init("icase");
 
@@ -1346,7 +1352,7 @@ void test_iterator_workdir__advance_over_with_pathlist(void)
 	i_opts.pathlist.strings = (char **)pathlist.contents;
 	i_opts.pathlist.count = pathlist.length;
 	i_opts.flags |= GIT_ITERATOR_DONT_IGNORE_CASE |
-		GIT_ITERATOR_DONT_AUTOEXPAND;
+		GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 
 	g_repo = cl_git_sandbox_init("icase");
 
@@ -1398,7 +1404,7 @@ void test_iterator_workdir__advance_into(void)
 	g_repo = cl_git_sandbox_init("icase");
 
 	i_opts.flags |= GIT_ITERATOR_DONT_IGNORE_CASE |
-		GIT_ITERATOR_DONT_AUTOEXPAND;
+		GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES;
 
 	cl_must_pass(p_mkdir("icase/Empty", 0777));
 
@@ -1448,7 +1454,7 @@ void test_iterator_workdir__pathlist_with_directory(void)
 
 	i_opts.pathlist.strings = (char **)filelist.contents;
 	i_opts.pathlist.count = filelist.length;
-	i_opts.flags |= GIT_ITERATOR_DONT_IGNORE_CASE;
+	i_opts.flags |= GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_HONOR_IGNORES;
 
 	cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 	expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1474,7 +1480,8 @@ void test_iterator_workdir__pathlist_with_directory_include_trees(void)
 
 	i_opts.pathlist.strings = (char **)filelist.contents;
 	i_opts.pathlist.count = filelist.length;
-	i_opts.flags |= GIT_ITERATOR_DONT_IGNORE_CASE | GIT_ITERATOR_INCLUDE_TREES;
+	i_opts.flags |= GIT_ITERATOR_DONT_IGNORE_CASE |
+			GIT_ITERATOR_INCLUDE_TREES | GIT_ITERATOR_HONOR_IGNORES;
 
 	cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 	expect_iterator_items(i, expected_len, expected, expected_len, expected);
@@ -1503,6 +1510,7 @@ void test_iterator_workdir__hash_when_requested(void)
 	g_repo = cl_git_sandbox_init("merge-recursive");
 
 	/* do the iteration normally, ensure there are no hashes */
+	iter_opts.flags = GIT_ITERATOR_HONOR_IGNORES;
 	cl_git_pass(git_iterator_for_workdir(&iter, g_repo, NULL, NULL, &iter_opts));
 
 	for (i = 0; i < sizeof(expected) / sizeof(struct merge_index_entry); i++) {
@@ -1515,7 +1523,7 @@ void test_iterator_workdir__hash_when_requested(void)
 	git_iterator_free(iter);
 
 	/* do the iteration requesting hashes */
-	iter_opts.flags |= GIT_ITERATOR_INCLUDE_HASH;
+	iter_opts.flags |= GIT_ITERATOR_INCLUDE_HASH | GIT_ITERATOR_HONOR_IGNORES;
 	cl_git_pass(git_iterator_for_workdir(&iter, g_repo, NULL, NULL, &iter_opts));
 
 	for (i = 0; i < sizeof(expected) / sizeof(struct merge_index_entry); i++) {
