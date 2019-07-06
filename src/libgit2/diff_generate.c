@@ -163,6 +163,44 @@ static void diff_delta__flag_known_sizes(git_diff_delta *delta)
 	diff_delta__flag_known_size(&delta->new_file);
 }
 
+/* Would a single-sided delta with this status be created for `entry`? Shares
+ * the filtering with diff_delta__from_one() so callers can ask before they
+ * commit to a walk. `matched_pathspec` may be NULL to skip pathspec matching. */
+static bool diff_delta__test(
+	git_diff_generated *diff,
+	git_delta_t status,
+	const git_index_entry *entry,
+	const char **matched_pathspec)
+{
+	const char *match;
+
+	if ((entry->flags & GIT_INDEX_ENTRY_VALID) != 0)
+		return false;
+
+	if (diff_delta_type_skipped(diff, status))
+		return false;
+
+	if (status == GIT_DELTA_IGNORED &&
+		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED))
+		return false;
+
+	if (status == GIT_DELTA_UNTRACKED &&
+		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_UNTRACKED))
+		return false;
+
+	if (status == GIT_DELTA_UNREADABLE &&
+		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_UNREADABLE))
+		return false;
+
+	if (!diff_pathspec_match(&match, diff, entry))
+		return false;
+
+	if (matched_pathspec)
+		*matched_pathspec = match;
+
+	return true;
+}
+
 static int diff_delta__from_one(
 	git_diff_generated *diff,
 	git_delta_t status,
@@ -187,25 +225,7 @@ static int diff_delta__from_one(
 	if (DIFF_FLAG_IS_SET(diff, GIT_DIFF_REVERSE))
 		has_old = !has_old;
 
-	if ((entry->flags & GIT_INDEX_ENTRY_VALID) != 0)
-		return 0;
-
-	if (diff_delta_type_skipped(diff, status))
-		return 0;
-
-	if (status == GIT_DELTA_IGNORED &&
-		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED))
-		return 0;
-
-	if (status == GIT_DELTA_UNTRACKED &&
-		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_UNTRACKED))
-		return 0;
-
-	if (status == GIT_DELTA_UNREADABLE &&
-		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_UNREADABLE))
-		return 0;
-
-	if (!diff_pathspec_match(&matched_pathspec, diff, entry))
+	if (!diff_delta__test(diff, status, entry, &matched_pathspec))
 		return 0;
 
 	delta = diff_delta__alloc(diff, status, entry->path);
@@ -225,6 +245,10 @@ static int diff_delta__from_one(
 		git_oid_cpy(&delta->old_file.id, &entry->id);
 		git_oid_clear(&delta->new_file.id, oid_type);
 		delta->old_file.id_abbrev = (uint16_t)git_oid_hexsize(oid_type);
+
+		/* a single-sided TYPECHANGE means the other side became a tree */
+		if (status == GIT_DELTA_TYPECHANGE)
+			delta->new_file.mode = GIT_FILEMODE_TREE;
 	} else /* ADDED, IGNORED, UNTRACKED */ {
 		delta->new_file.mode = entry->mode;
 		delta->new_file.size = entry->file_size;
@@ -232,6 +256,9 @@ static int diff_delta__from_one(
 		git_oid_clear(&delta->old_file.id, oid_type);
 		git_oid_cpy(&delta->new_file.id, &entry->id);
 		delta->new_file.id_abbrev = (uint16_t)git_oid_hexsize(oid_type);
+
+		if (status == GIT_DELTA_TYPECHANGE)
+			delta->old_file.mode = GIT_FILEMODE_TREE;
 	}
 
 	delta->old_file.flags |= GIT_DIFF_FLAG_VALID_ID;
@@ -312,43 +339,6 @@ static int diff_delta__from_two(
 	diff_delta__flag_known_sizes(delta);
 
 	return diff_insert_delta(diff, delta, matched_pathspec);
-}
-
-static git_diff_delta *diff_delta__last_for_item(
-	git_diff_generated *diff,
-	const git_index_entry *item)
-{
-	git_diff_delta *delta = git_vector_last(&diff->base.deltas);
-	if (!delta)
-		return NULL;
-
-	switch (delta->status) {
-	case GIT_DELTA_UNMODIFIED:
-	case GIT_DELTA_DELETED:
-		if (git_oid__cmp(&delta->old_file.id, &item->id) == 0)
-			return delta;
-		break;
-	case GIT_DELTA_ADDED:
-		if (git_oid__cmp(&delta->new_file.id, &item->id) == 0)
-			return delta;
-		break;
-	case GIT_DELTA_UNREADABLE:
-	case GIT_DELTA_UNTRACKED:
-		if (diff->base.strcomp(delta->new_file.path, item->path) == 0 &&
-			git_oid__cmp(&delta->new_file.id, &item->id) == 0)
-			return delta;
-		break;
-	case GIT_DELTA_MODIFIED:
-		if (git_oid__cmp(&delta->old_file.id, &item->id) == 0 ||
-		    (delta->new_file.mode == item->mode &&
-			git_oid__cmp(&delta->new_file.id, &item->id) == 0))
-			return delta;
-		break;
-	default:
-		break;
-	}
-
-	return NULL;
 }
 
 static char *diff_strdup_prefix(git_pool *pool, const char *prefix)
@@ -1091,20 +1081,15 @@ static int handle_unmatched_new_item(
 	if (git_index_entry_is_conflict(nitem))
 		delta_type = GIT_DELTA_CONFLICTED;
 
-	/* update delta_type if this item is ignored but
-   * only if it makes a difference -- ignore checks are expensive
-   */
-  else if ((!contains_oitem ||
-            DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED | GIT_DIFF_RECURSE_IGNORED_DIRS |
-                                        GIT_DIFF_ENABLE_FAST_UNTRACKED_DIRS)) &&
-            git_iterator_current_is_ignored(info->new_iter))
-    delta_type = GIT_DELTA_IGNORED;
+	/* update delta_type if this item is ignored, but only if it makes a
+	 * difference: a tree with tracked contents is walked regardless, and
+	 * ignore checks are expensive */
+	else if (!(nitem->mode == GIT_FILEMODE_TREE && contains_oitem) &&
+		 git_iterator_current_is_ignored(info->new_iter))
+		delta_type = GIT_DELTA_IGNORED;
 
 	if (nitem->mode == GIT_FILEMODE_TREE) {
-		bool recurse_into_dir = contains_oitem;
-
-		/* check if user requests recursion into this type of dir */
-		recurse_into_dir = contains_oitem ||
+		bool recurse_into_dir = contains_oitem ||
 			(delta_type == GIT_DELTA_UNTRACKED &&
 			 DIFF_FLAG_IS_SET(diff, GIT_DIFF_RECURSE_UNTRACKED_DIRS)) ||
 			(delta_type == GIT_DELTA_IGNORED &&
@@ -1128,42 +1113,29 @@ static int handle_unmatched_new_item(
 			delta_type == GIT_DELTA_UNTRACKED &&
 			DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_ENABLE_FAST_UNTRACKED_DIRS))
 		{
-			git_diff_delta *last;
 			git_iterator_status_t untracked_state;
+			git_index_entry entry;
 
-			/* attempt to insert record for this directory */
-			if ((error = diff_delta__from_one(diff, delta_type, NULL, nitem)) != 0)
-				return error;
-
-			/* if delta wasn't created (because of rules), just skip ahead */
-			last = diff_delta__last_for_item(diff, nitem);
-			if (!last)
+			if (!diff_delta__test(diff, delta_type, nitem, NULL))
 				return iterator_advance(&info->nitem, info->new_iter);
+
+			entry = *nitem;
 
 			/* iterate into dir looking for an actual untracked file */
 			if ((error = iterator_advance_over(
 					&info->nitem, &untracked_state, info->new_iter)) < 0)
 				return error;
 
-			/* if we found nothing that matched our pathlist filter, exclude */
-			if (untracked_state == GIT_ITERATOR_STATUS_FILTERED) {
-				git_vector_pop(&diff->base.deltas);
-				git__free(last);
-			}
-
 			/* if we found nothing or just ignored items, update the record */
 			if (untracked_state == GIT_ITERATOR_STATUS_IGNORED ||
 				untracked_state == GIT_ITERATOR_STATUS_EMPTY) {
-				last->status = GIT_DELTA_IGNORED;
+				delta_type = GIT_DELTA_IGNORED;
 
-				/* remove the record if we don't want ignored records */
-				if (DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED)) {
-					git_vector_pop(&diff->base.deltas);
-					git__free(last);
-				}
+				if (DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED))
+					return 0;
 			}
 
-			return 0;
+			return diff_delta__from_one(diff, delta_type, NULL, &entry);
 		}
 
 		/* try to advance into directory if necessary */
@@ -1216,10 +1188,6 @@ static int handle_unmatched_new_item(
 			delta_type = GIT_DELTA_UNREADABLE;
 	}
 
-	/* Actually create the record for this item if necessary */
-	if ((error = diff_delta__from_one(diff, delta_type, NULL, nitem)) != 0)
-		return error;
-
 	/* If user requested TYPECHANGE records, then check for that instead of
 	 * just generating an ADDED/UNTRACKED record
 	 */
@@ -1228,12 +1196,12 @@ static int handle_unmatched_new_item(
 		contains_oitem)
 	{
 		/* this entry was prefixed with a tree - make TYPECHANGE */
-		git_diff_delta *last = diff_delta__last_for_item(diff, nitem);
-		if (last) {
-			last->status = GIT_DELTA_TYPECHANGE;
-			last->old_file.mode = GIT_FILEMODE_TREE;
-		}
+		delta_type = GIT_DELTA_TYPECHANGE;
 	}
+
+	/* Actually create the record for this item if necessary */
+	if ((error = diff_delta__from_one(diff, delta_type, NULL, nitem)) != 0)
+		return error;
 
 	return iterator_advance(&info->nitem, info->new_iter);
 }
@@ -1248,30 +1216,27 @@ static int handle_unmatched_old_item(
 	if (git_index_entry_is_conflict(info->oitem))
 		delta_type = GIT_DELTA_CONFLICTED;
 
-	if ((error = diff_delta__from_one(diff, delta_type, info->oitem, NULL)) < 0)
-		return error;
-
 	/* if we are generating TYPECHANGE records then check for that
 	 * instead of just generating a DELETE record
 	 */
-	if (DIFF_FLAG_IS_SET(diff, GIT_DIFF_INCLUDE_TYPECHANGE_TREES) &&
-		entry_is_prefixed(diff, info->nitem, info->oitem))
-	{
+	else if (DIFF_FLAG_IS_SET(diff, GIT_DIFF_INCLUDE_TYPECHANGE_TREES) &&
+		entry_is_prefixed(diff, info->nitem, info->oitem)) {
 		/* this entry has become a tree! convert to TYPECHANGE */
-		git_diff_delta *last = diff_delta__last_for_item(diff, info->oitem);
-		if (last) {
-			last->status = GIT_DELTA_TYPECHANGE;
-			last->new_file.mode = GIT_FILEMODE_TREE;
-		}
+		delta_type = GIT_DELTA_TYPECHANGE;
 
-		/* If new_iter is a workdir iterator, then this situation
-		 * will certainly be followed by a series of untracked items.
-		 * Unless RECURSE_UNTRACKED_DIRS is set, skip over them...
-		 */
+		/* The new side is the tree that replaced this entry, so what
+		 * follows is its untracked contents. Unless the caller asked to
+		 * recurse into untracked dirs, skip them rather than report them
+		 * on top of the typechange. Either way we advance oitem below,
+		 * so the deleted entry is reported exactly once. */
 		if (S_ISDIR(info->nitem->mode) &&
-			DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_RECURSE_UNTRACKED_DIRS))
-			return iterator_advance(&info->nitem, info->new_iter);
+		    DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_RECURSE_UNTRACKED_DIRS) &&
+		    (error = iterator_advance(&info->nitem, info->new_iter)) < 0)
+			return error;
 	}
+
+	if ((error = diff_delta__from_one(diff, delta_type, info->oitem, NULL)) < 0)
+		return error;
 
 	return iterator_advance(&info->oitem, info->old_iter);
 }
@@ -1521,7 +1486,6 @@ int git_diff_index_to_workdir(
 	git_diff *diff = NULL;
 	char *prefix = NULL;
 	int error = 0;
-	unsigned int dflags = GIT_ITERATOR_DONT_AUTOEXPAND;
 
 	GIT_ASSERT_ARG(out);
 	GIT_ASSERT_ARG(repo);
@@ -1531,17 +1495,8 @@ int git_diff_index_to_workdir(
 	if (!index && (error = diff_load_index(&index, repo)) < 0)
 		return error;
 
-	/* checking ignore rules is expensive, so we turn it on only if it
-	 * can make a difference */
-	if (opts && opts->flags & (GIT_DIFF_INCLUDE_IGNORED |
-				   GIT_DIFF_INCLUDE_UNTRACKED |
-				   GIT_DIFF_RECURSE_UNTRACKED_DIRS |
-				   GIT_DIFF_RECURSE_IGNORED_DIRS |
-				   GIT_DIFF_ENABLE_FAST_UNTRACKED_DIRS))
-		dflags |= GIT_ITERATOR_HONOR_IGNORES;
-
 	if ((error = diff_prepare_iterator_opts(&prefix, &a_opts, GIT_ITERATOR_INCLUDE_CONFLICTS,
-						&b_opts, dflags, opts)) < 0 ||
+						&b_opts, GIT_ITERATOR_DONT_AUTOEXPAND | GIT_ITERATOR_HONOR_IGNORES, opts)) < 0 ||
 	    (error = git_iterator_for_index(&a, repo, index, &a_opts)) < 0 ||
 	    (error = git_iterator_for_workdir(&b, repo, index, NULL, &b_opts)) < 0 ||
 	    (error = git_diff__from_iterators(&diff, repo, a, b, opts)) < 0)
