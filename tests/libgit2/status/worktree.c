@@ -1370,3 +1370,30 @@ void test_status_worktree__skip_hash(void)
 	cl_git_pass(git_index_read(index, true));
 	git_index_free(index);
 }
+
+/* git add -N records an intent-to-add entry; git shows that as an unstaged
+ * addition (" A"), not as a staged one */
+void test_status_worktree__intent_to_add(void)
+{
+	git_repository *repo = cl_git_sandbox_init("status");
+	git_index *index;
+	git_index_entry entry;
+	unsigned int status;
+
+	cl_git_mkfile("status/ita.txt", "intent to add\n");
+
+	/* the entry points at the empty blob, which the odb has to hold */
+	memset(&entry, 0, sizeof(entry));
+	entry.path = "ita.txt";
+	entry.mode = GIT_FILEMODE_BLOB;
+	entry.flags_extended = GIT_INDEX_ENTRY_INTENT_TO_ADD;
+	cl_git_pass(git_blob_create_from_buffer(&entry.id, repo, "", 0));
+
+	cl_git_pass(git_repository_index(&index, repo));
+	cl_git_pass(git_index_add(index, &entry));
+	cl_git_pass(git_index_write(index));
+	git_index_free(index);
+
+	cl_git_pass(git_status_file(&status, repo, "ita.txt"));
+	cl_assert_equal_i(GIT_STATUS_WT_NEW, status);
+}

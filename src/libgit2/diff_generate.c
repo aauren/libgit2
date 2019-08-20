@@ -887,6 +887,10 @@ static int maybe_modified(
 			 !git_oid_is_zero(&oitem->id)) {
 		status = GIT_DELTA_UNMODIFIED;
 
+	/* intent-to-add (git add -N) shows up as an unstaged addition */
+	} else if ((oitem->flags_extended & GIT_INDEX_ENTRY_INTENT_TO_ADD) && new_is_workdir) {
+		status = GIT_DELTA_ADDED;
+
 	/* if we have an unknown OID and a workdir iterator, then check some
 	 * circumstances that can accelerate things or need special handling
 	 */
@@ -1307,6 +1311,16 @@ int git_diff__from_iterators(
 	/* run iterators building diffs */
 	while (!error && (info.oitem || info.nitem)) {
 		int cmp;
+
+		/* An intent-to-add entry (git add -N) isn't staged: git shows it as
+		 * unstaged-added, so when the index is the new side (tree vs index)
+		 * it's not a delta at all, and against the workdir it's ADDED. */
+		if (new_iter->type == GIT_ITERATOR_INDEX && info.nitem &&
+		    (info.nitem->flags_extended & GIT_INDEX_ENTRY_INTENT_TO_ADD)) {
+			if ((error = iterator_advance(&info.nitem, info.new_iter)) < 0)
+				break;
+			continue;
+		}
 
 		/* report progress */
 		if (opts && opts->progress_cb) {
