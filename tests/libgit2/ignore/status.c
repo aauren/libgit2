@@ -1339,3 +1339,25 @@ void test_ignore_status__override_nested_wildcard_unignore(void)
 
 	git_status_list_free(statuslist);
 }
+
+/* A negation in a nested .gitignore has to undo a rule from a parent's
+ * .gitignore, not just rules in its own file. */
+void test_ignore_status__negation_in_nested_ignore_file(void)
+{
+	static const char *test_files[] = {
+		"empty_standard_repo/root.log",
+		"empty_standard_repo/sub/important.log",
+		"empty_standard_repo/sub/other.log",
+		"empty_standard_repo/sub/deeper/important.log",
+		NULL
+	};
+
+	make_test_data("empty_standard_repo", test_files);
+	cl_git_mkfile("empty_standard_repo/.gitignore", "*.log\n");
+	cl_git_mkfile("empty_standard_repo/sub/.gitignore", "!important.log\n");
+
+	assert_is_ignored("root.log");
+	assert_is_ignored("sub/other.log");
+	refute_is_ignored("sub/important.log");
+	refute_is_ignored("sub/deeper/important.log");
+}
