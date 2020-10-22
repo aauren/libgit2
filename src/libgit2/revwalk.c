@@ -401,9 +401,15 @@ static int add_parents_to_list(git_revwalk *walk, git_commit_list_node *commit, 
 			git_commit_list_node *p = commit->parents[i];
 			p->uninteresting = 1;
 
-			/* git does it gently here, but we don't like missing objects */
-			if ((error = git_commit_list_parse(walk, p)) < 0)
-				return error;
+			/* git does it gently here: a parent that isn't in the odb
+			 * (a shallow boundary that grafts didn't cover) just ends
+			 * the uninteresting walk on that side */
+			if ((error = git_commit_list_parse(walk, p)) < 0) {
+				if (error != GIT_ENOTFOUND)
+					return error;
+				git_error_clear();
+				error = 0;
+			}
 
 			if (p->parents)
 				mark_parents_uninteresting(p);
