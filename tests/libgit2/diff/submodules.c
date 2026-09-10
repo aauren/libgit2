@@ -446,6 +446,49 @@ void test_diff_submodules__diff_ignore_options(void)
 	git_config_free(cfg);
 }
 
+/* submodule.<name>.ignore wins over diff.ignoreSubmodules, as in git; only
+ * an explicit ignore_submodules option overrides both */
+void test_diff_submodules__per_submodule_ignore_overrides_config(void)
+{
+	git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
+	git_diff *diff = NULL;
+	git_config *cfg;
+	static const char *expected_only_sm_changed_file[] = {
+		"<SKIP>", /* .gitmodules */
+		"<UNTRACKED>", /* not-submodule */
+		"<UNTRACKED>", /* not */
+		"diff --git a/sm_changed_file b/sm_changed_file\nindex 4800958..4800958 160000\n--- a/sm_changed_file\n+++ b/sm_changed_file\n@@ -1 +1 @@\n-Subproject commit 480095882d281ed676fe5b863569520e54a7d5c0\n+Subproject commit 480095882d281ed676fe5b863569520e54a7d5c0-dirty\n", /* sm_changed_file */
+		"<END>"
+	};
+	static const char *expected_ignore_all[] = {
+		"<SKIP>", /* .gitmodules */
+		"<UNTRACKED>", /* not-submodule */
+		"<UNTRACKED>", /* not */
+		"<END>"
+	};
+
+	g_repo = setup_fixture_submod2();
+
+	opts.flags = GIT_DIFF_INCLUDE_UNTRACKED;
+	opts.old_prefix = "a"; opts.new_prefix = "b";
+
+	cl_git_pass(git_repository_config(&cfg, g_repo));
+	cl_git_pass(git_config_set_string(cfg, "diff.ignoreSubmodules", "all"));
+	git_config_free(cfg);
+	/* goes into .gitmodules, which is the only place libgit2 reads it from */
+	cl_git_pass(git_submodule_set_ignore(g_repo, "sm_changed_file", GIT_SUBMODULE_IGNORE_NONE));
+
+	cl_git_pass(git_diff_index_to_workdir(&diff, g_repo, NULL, &opts));
+	check_diff_patches(diff, expected_only_sm_changed_file);
+	git_diff_free(diff);
+
+	opts.ignore_submodules = GIT_SUBMODULE_IGNORE_ALL;
+
+	cl_git_pass(git_diff_index_to_workdir(&diff, g_repo, NULL, &opts));
+	check_diff_patches(diff, expected_ignore_all);
+	git_diff_free(diff);
+}
+
 void test_diff_submodules__skips_empty_includes_used(void)
 {
 	git_diff_options opts = GIT_DIFF_OPTIONS_INIT;

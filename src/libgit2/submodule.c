@@ -2140,6 +2140,7 @@ static int submodule_read_config(git_submodule *sm, git_config *cfg)
 		if ((error = git_submodule_parse_ignore(&sm->ignore, value)) < 0)
 			goto cleanup;
 		sm->ignore_default = sm->ignore;
+		sm->flags |= GIT_SUBMODULE_STATUS__IGNORE_CONFIGURED;
 	} else if (error != GIT_ENOTFOUND) {
 		goto cleanup;
 	}

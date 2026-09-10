@@ -33,6 +33,9 @@ typedef struct {
 
 	uint32_t diffcaps;
 	bool index_updated;
+	/* diff.ignoreSubmodules from config; a default that a submodule's own
+	 * ignore setting overrides, unlike opts.ignore_submodules which wins */
+	git_submodule_ignore_t ignore_submodules_default;
 	/* GIT_DIFF_EXEMPLARS: bit (status + 1) set once the callback asked us to
 	 * stop producing deltas with that status */
 	uint32_t seen_delta_types;
@@ -571,13 +574,16 @@ static int diff_generated_apply_options(
 		   diff->base.new_src == GIT_ITERATOR_INDEX)))
 		diff->base.opts.flags &= ~GIT_DIFF_UPDATE_INDEX;
 
-	/* if ignore_submodules not explicitly set, check diff config */
+	/* if ignore_submodules not explicitly set, check diff config. This is
+	 * only a default: git lets submodule.<name>.ignore override it, and
+	 * only the explicit option (like --ignore-submodules) overrides both. */
+	diff->ignore_submodules_default = GIT_SUBMODULE_IGNORE_UNSPECIFIED;
 	if (diff->base.opts.ignore_submodules <= 0) {
-		 git_config_entry *entry;
+		git_config_entry *entry;
 		git_config__lookup_entry(&entry, cfg, "diff.ignoresubmodules", true);
 
 		if (entry && git_submodule_parse_ignore(
-				&diff->base.opts.ignore_submodules, entry->value) < 0)
+				&diff->ignore_submodules_default, entry->value) < 0)
 			git_error_clear();
 		git_config_entry_free(entry);
 	}
@@ -798,7 +804,17 @@ static int maybe_modified_submodule(
 		return error;
 	}
 
-	if (ign <= 0 && git_submodule_ignore(sub) == GIT_SUBMODULE_IGNORE_ALL)
+	/* unless the caller set it explicitly, the submodule's own setting
+	 * wins when it was configured, and diff.ignoreSubmodules otherwise */
+	if (ign <= 0) {
+		if ((sub->flags & GIT_SUBMODULE_STATUS__IGNORE_CONFIGURED) ||
+		    diff->ignore_submodules_default <= 0)
+			ign = git_submodule_ignore(sub);
+		else
+			ign = diff->ignore_submodules_default;
+	}
+
+	if (ign == GIT_SUBMODULE_IGNORE_ALL)
 		/* ignore it */;
 	else if ((error = git_submodule__status(
 			&sm_status, NULL, NULL, found_oid, sub, ign)) < 0)

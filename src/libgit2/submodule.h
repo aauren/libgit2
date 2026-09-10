@@ -111,7 +111,10 @@ enum {
 	GIT_SUBMODULE_STATUS__HEAD_NOT_SUBMODULE  = (1u << 24),
 	GIT_SUBMODULE_STATUS__INDEX_NOT_SUBMODULE = (1u << 25),
 	GIT_SUBMODULE_STATUS__WD_NOT_SUBMODULE    = (1u << 26),
-	GIT_SUBMODULE_STATUS__INDEX_MULTIPLE_ENTRIES = (1u << 27)
+	GIT_SUBMODULE_STATUS__INDEX_MULTIPLE_ENTRIES = (1u << 27),
+	/* submodule.<name>.ignore was set explicitly (config or .gitmodules),
+	 * as opposed to `ignore` holding the default */
+	GIT_SUBMODULE_STATUS__IGNORE_CONFIGURED   = (1u << 28)
 };
 
 #define GIT_SUBMODULE_STATUS__CLEAR_INTERNAL(S) \
