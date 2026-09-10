@@ -169,6 +169,12 @@ static int packed_reload(refdb_fs_backend *backend)
 		if (eol[-1] == '\r')
 			eol[-1] = '\0';
 
+		/* in a sorted file we can stop at refs/tags/ rather than parse
+		 * every tag; anything after it (refs/worktree/...) goes too */
+		if (backend->sorted && git_refdb__disable_reading_packed_tags &&
+		    strcmp(scan, "refs/tags/") > 0)
+			break;
+
 		if (git_sortedcache_upsert((void **)&ref, backend->refcache, scan) < 0)
 			goto parse_failed;
 		scan = eol + 1;

@@ -271,7 +271,8 @@ typedef enum {
 	GIT_OPT_GET_PACK_MAX_OBJECT_SIZE,
 	GIT_OPT_SET_PACK_MAX_OBJECT_SIZE,
 	GIT_OPT_DISABLE_INDEX_CHECKSUM_VERIFICATION,
-	GIT_OPT_DISABLE_INDEX_FILEPATH_VALIDATION
+	GIT_OPT_DISABLE_INDEX_FILEPATH_VALIDATION,
+	GIT_OPT_DISABLE_READNG_PACKED_TAGS
 } git_libgit2_opt_t;
 
 /**
@@ -596,6 +597,15 @@ typedef enum {
  *      > Skip validating the paths of entries read from an existing
  *      > index file (`.git`, `..`, and platform-specific rejects). Paths
  *      > added to the index are always validated. Off by default.
+ *
+ *   opts(GIT_OPT_DISABLE_READNG_PACKED_TAGS, int enabled)
+ *
+ *      > Stop parsing `packed-refs` at the first ref that sorts after
+ *      > `refs/tags/`, so tags (and anything sorting after them, such as
+ *      > `refs/worktree/`) never enter the ref cache. Only honored when
+ *      > the file declares itself sorted. For callers that read tags on
+ *      > their own and don't want to pay for a large packed tag list.
+ *      > Off by default.
  *
  * @param option Option key
  * @return 0 on success, <0 on failure
