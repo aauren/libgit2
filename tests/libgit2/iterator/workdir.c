@@ -1086,7 +1086,9 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
-		cl_assert_equal_i(4, i->stat_calls);
+		/* only the leaf file is stat'ed; the three directories above it
+		 * are typed from the dirent */
+		cl_assert_equal_i(1, i->stat_calls);
 		git_iterator_free(i);
 	}
 
@@ -1111,7 +1113,8 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
-		cl_assert_equal_i(11, i->stat_calls);
+		/* eight files, and none of the three directories above them */
+		cl_assert_equal_i(8, i->stat_calls);
 		git_iterator_free(i);
 	}
 
@@ -1152,7 +1155,8 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
-		cl_assert_equal_i(42, i->stat_calls);
+		/* one stat per file returned, none for directories */
+		cl_assert_equal_i(36, i->stat_calls);
 		git_iterator_free(i);
 	}
 
@@ -1184,7 +1188,9 @@ void test_iterator_workdir__pathlist_for_deeply_nested_item(void)
 
 		cl_git_pass(git_iterator_for_workdir(&i, g_repo, NULL, NULL, &i_opts));
 		expect_iterator_items(i, expected_len, expected, expected_len, expected);
-		cl_assert_equal_i(14, i->stat_calls);
+		/* the five files, plus item2 and item5/item3/item4 which have to be
+		 * stat'ed to learn they aren't the directories the pathlist asked for */
+		cl_assert_equal_i(7, i->stat_calls);
 		git_iterator_free(i);
 	}
 
