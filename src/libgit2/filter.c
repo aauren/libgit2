@@ -46,7 +46,10 @@ typedef struct {
 	char *filter_name;
 	git_filter *filter;
 	int priority;
-	int initialized;
+	/* set once the filter's initialize callback has run; readers only hold
+	 * the registry lock shared, so it's atomic and the slow path serializes
+	 * on init_lock */
+	git_atomic32 initialized;
 	size_t nattrs, nmatches;
 	char *attrdata;
 	const char *attrs[GIT_FLEX_ARRAY];
@@ -61,6 +64,7 @@ static int filter_def_priority_cmp(const void *a, const void *b)
 
 struct git_filter_registry {
 	git_rwlock lock;
+	git_mutex init_lock;
 	git_vector filters;
 };
 
@@ -196,6 +200,11 @@ int git_filter_global_init(void)
 	if (git_rwlock_init(&filter_registry.lock) < 0)
 		return -1;
 
+	if (git_mutex_init(&filter_registry.init_lock) < 0) {
+		git_rwlock_free(&filter_registry.lock);
+		return -1;
+	}
+
 	if ((error = git_vector_init(&filter_registry.filters, 2,
 		filter_def_priority_cmp)) < 0)
 		goto done;
@@ -231,7 +240,7 @@ static void git_filter_global_shutdown(void)
 	git_vector_foreach(&filter_registry.filters, pos, fdef) {
 		if (fdef->filter && fdef->filter->shutdown) {
 			fdef->filter->shutdown(fdef->filter);
-			fdef->initialized = false;
+			git_atomic32_set(&fdef->initialized, 0);
 		}
 
 		git__free(fdef->filter_name);
@@ -243,6 +252,7 @@ static void git_filter_global_shutdown(void)
 
 	git_rwlock_wrunlock(&filter_registry.lock);
 	git_rwlock_free(&filter_registry.lock);
+	git_mutex_free(&filter_registry.init_lock);
 }
 
 /* Note: callers must lock the registry before calling this function */
@@ -318,9 +328,9 @@ int git_filter_unregister(const char *name)
 
 	git_vector_remove(&filter_registry.filters, pos);
 
-	if (fdef->initialized && fdef->filter && fdef->filter->shutdown) {
+	if (git_atomic32_get(&fdef->initialized) && fdef->filter && fdef->filter->shutdown) {
 		fdef->filter->shutdown(fdef->filter);
-		fdef->initialized = false;
+		git_atomic32_set(&fdef->initialized, 0);
 	}
 
 	git__free(fdef->filter_name);
@@ -332,17 +342,29 @@ done:
 	return error;
 }
 
+/* Called with the registry lock held shared, so several threads can get here
+ * for the same filter at once; the mutex makes sure initialize() runs once. */
 static int filter_initialize(git_filter_def *fdef)
 {
 	int error = 0;
 
-	if (!fdef->initialized && fdef->filter && fdef->filter->initialize) {
-		if ((error = fdef->filter->initialize(fdef->filter)) < 0)
-			return error;
+	if (git_atomic32_get(&fdef->initialized))
+		return 0;
+
+	if (git_mutex_lock(&filter_registry.init_lock) < 0) {
+		git_error_set(GIT_ERROR_OS, "failed to lock filter registry");
+		return -1;
 	}
 
-	fdef->initialized = true;
-	return 0;
+	if (!git_atomic32_get(&fdef->initialized)) {
+		if (fdef->filter && fdef->filter->initialize)
+			error = fdef->filter->initialize(fdef->filter);
+		if (!error)
+			git_atomic32_set(&fdef->initialized, 1);
+	}
+
+	git_mutex_unlock(&filter_registry.init_lock);
+	return error;
 }
 
 git_filter *git_filter_lookup(const char *name)
@@ -357,7 +379,7 @@ git_filter *git_filter_lookup(const char *name)
 	}
 
 	if ((fdef = filter_registry_lookup(&pos, name)) == NULL ||
-		(!fdef->initialized && filter_initialize(fdef) < 0))
+		filter_initialize(fdef) < 0)
 		goto done;
 
 	filter = fdef->filter;
@@ -566,7 +588,7 @@ int git_filter_list__load(
 				break;
 		}
 
-		if (!fdef->initialized && (error = filter_initialize(fdef)) < 0)
+		if ((error = filter_initialize(fdef)) < 0)
 			break;
 
 		if (fdef->filter->check)
@@ -705,7 +727,7 @@ int git_filter_list_push(
 		return -1;
 	}
 
-	if (!fdef->initialized && (error = filter_initialize(fdef)) < 0)
+	if ((error = filter_initialize(fdef)) < 0)
 		return error;
 
 	fe = git_array_alloc(fl->filters);
