@@ -22,6 +22,9 @@
  * Read whole files into an in-memory buffer for processing
  */
 extern int git_futils_readbuffer(git_str *obj, const char *path);
+/* like git_futils_readbuffer, but a missing file returns GIT_ENOTFOUND
+ * without setting an error message */
+extern int git_futils_readbuffer_quiet(git_str *obj, const char *path);
 extern int git_futils_readbuffer_updated(
 	git_str *obj,
 	const char *path,

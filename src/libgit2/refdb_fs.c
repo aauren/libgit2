@@ -238,12 +238,14 @@ corrupted:
 	return -1;
 }
 
+/* Doesn't set an error when returning GIT_ENOTFOUND: most lookups probe
+ * for loose refs that aren't there, and callers don't read the message. */
 static int loose_readbuffer(git_str *buf, const char *base, const char *path)
 {
 	int error;
 
 	if ((error = loose_path(buf, base, path)) < 0 ||
-	    (error = git_futils_readbuffer(buf, buf->ptr)) < 0)
+	    (error = git_futils_readbuffer_quiet(buf, buf->ptr)) < 0)
 		git_str_dispose(buf);
 
 	return error;
