@@ -170,7 +170,14 @@ typedef enum {
 	/** Include the necessary deflate / delta information so that `git-apply`
 	 *  can apply given diff information to binary files.
 	 */
-	GIT_DIFF_SHOW_BINARY = (1u << 30)
+	GIT_DIFF_SHOW_BINARY = (1u << 30),
+
+	/**
+	 * Change the way the result of `git_diff_notify_cb` is interpreted so
+	 * that a caller can ask for at most one delta per type. See the comment
+	 * above `git_diff_notify_cb`.
+	 */
+	GIT_DIFF_EXEMPLARS = (1u << 27)
 } git_diff_option_t;
 
 /**
@@ -330,18 +337,33 @@ typedef struct {
 	git_diff_file new_file;
 } git_diff_delta;
 
+/** Return flags for `git_diff_notify_cb` when `GIT_DIFF_EXEMPLARS` is set. */
+typedef enum {
+	/** Don't insert this delta into the diff. */
+	GIT_DIFF_DELTA_DO_NOT_INSERT = 1,
+	/** Don't notify about (or insert) further deltas of this delta's status. */
+	GIT_DIFF_DELTA_SKIP_TYPE = 2
+} git_diff_delta_notify_t;
+
 /**
  * Diff notification callback function.
  *
  * The callback will be called for each file, just before the `git_diff_delta`
  * gets inserted into the diff.
  *
- * When the callback:
+ * Normally, when the callback:
  * - returns < 0, the diff process will be aborted.
  * - returns > 0, the delta will not be inserted into the diff, but the
  *		diff process continues.
  * - returns 0, the delta is inserted into the diff, and the diff process
  *		continues.
+ *
+ * With `GIT_DIFF_EXEMPLARS` set, a negative return still aborts, but a
+ * non-negative return is a bitmask of `git_diff_delta_notify_t`: set
+ * `GIT_DIFF_DELTA_DO_NOT_INSERT` to drop this delta, and
+ * `GIT_DIFF_DELTA_SKIP_TYPE` to stop generating deltas with this status
+ * for the rest of the diff (for untracked files this also stops
+ * descending into untracked directories).
  *
  * @param diff_so_far the diff structure as it currently exists
  * @param delta_to_add the delta that is to be added
