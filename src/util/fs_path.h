@@ -516,6 +516,7 @@ struct git_fs_path_diriter
 	unsigned int flags;
 
 	DIR *dir;
+	unsigned char d_type;
 
 #ifdef GIT_I18N_ICONV
 	git_fs_path_iconv_t ic;
@@ -588,6 +589,19 @@ extern int git_fs_path_diriter_fullpath(
  * @return 0 or an error code
  */
 extern int git_fs_path_diriter_stat(struct stat *out, git_fs_path_diriter *diriter);
+
+typedef enum {
+	GIT_FS_PATH_DIRENT_UNKNOWN = 0,
+	GIT_FS_PATH_DIRENT_DIR,
+	GIT_FS_PATH_DIRENT_OTHER
+} git_fs_path_dirent_type;
+
+/**
+ * Returns what the directory listing itself says about the current item's
+ * type, without a stat call. Symlinks are OTHER. UNKNOWN means the caller
+ * has to stat to find out (some filesystems never fill in d_type).
+ */
+extern git_fs_path_dirent_type git_fs_path_diriter_type(git_fs_path_diriter *diriter);
 
 /**
  * Closes the directory iterator.

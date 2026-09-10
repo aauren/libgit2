@@ -1384,6 +1384,18 @@ int git_fs_path_diriter_stat(struct stat *out, git_fs_path_diriter *diriter)
 		diriter->path);
 }
 
+git_fs_path_dirent_type git_fs_path_diriter_type(git_fs_path_diriter *diriter)
+{
+	DWORD attrs = diriter->current.dwFileAttributes;
+
+	/* reparse points may be symlinks to directories; let the caller stat */
+	if (attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+		return GIT_FS_PATH_DIRENT_UNKNOWN;
+
+	return (attrs & FILE_ATTRIBUTE_DIRECTORY) ?
+		GIT_FS_PATH_DIRENT_DIR : GIT_FS_PATH_DIRENT_OTHER;
+}
+
 void git_fs_path_diriter_free(git_fs_path_diriter *diriter)
 {
 	if (diriter == NULL)
@@ -1466,6 +1478,7 @@ int git_fs_path_diriter_next(git_fs_path_diriter *diriter)
 
 	filename = de->d_name;
 	filename_len = strlen(filename);
+	diriter->d_type = de->d_type;
 
 #ifdef GIT_I18N_ICONV
 	if ((diriter->flags & GIT_FS_PATH_DIR_PRECOMPOSE_UNICODE) != 0 &&
@@ -1518,10 +1531,33 @@ int git_fs_path_diriter_fullpath(
 
 int git_fs_path_diriter_stat(struct stat *out, git_fs_path_diriter *diriter)
 {
+	const char *filename;
+	size_t filename_len;
+	int error;
+
 	GIT_ASSERT_ARG(out);
 	GIT_ASSERT_ARG(diriter);
 
-	return git_fs_path_lstat(diriter->path.ptr, out);
+	if ((error = git_fs_path_diriter_filename(&filename, &filename_len, diriter)) < 0)
+		return error;
+
+	/* relative to the open directory, so the kernel skips the parent walk */
+	if (fstatat(dirfd(diriter->dir), filename, out, AT_SYMLINK_NOFOLLOW) == 0)
+		return 0;
+
+	return git_fs_path_set_error(errno, diriter->path.ptr, "stat");
+}
+
+git_fs_path_dirent_type git_fs_path_diriter_type(git_fs_path_diriter *diriter)
+{
+	switch (diriter->d_type) {
+	case DT_DIR:
+		return GIT_FS_PATH_DIRENT_DIR;
+	case DT_UNKNOWN:
+		return GIT_FS_PATH_DIRENT_UNKNOWN;
+	default:
+		return GIT_FS_PATH_DIRENT_OTHER;
+	}
 }
 
 void git_fs_path_diriter_free(git_fs_path_diriter *diriter)
