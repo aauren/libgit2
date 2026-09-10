@@ -1120,22 +1120,36 @@ static int handle_unmatched_new_item(
 		{
 			git_iterator_status_t untracked_state;
 			git_index_entry entry = *nitem;
+			char *path_copy;
+
+			/* nitem->path lives in the workdir iterator's frame pool, and advancing over
+			 * the directory can pop that frame (and free the pool) when the directory is
+			 * the last entry of its parent, so copy the path before we advance. */
+			path_copy = git__strdup(nitem->path);
+			GIT_ERROR_CHECK_ALLOC(path_copy);
+			entry.path = path_copy;
 
 			/* iterate into dir looking for an actual untracked file */
 			if ((error = iterator_advance_over(
-					&info->nitem, &untracked_state, info->new_iter)) < 0)
+					&info->nitem, &untracked_state, info->new_iter)) < 0) {
+				git__free(path_copy);
 				return error;
+			}
 
 			/* if we found nothing or just ignored items, update the record */
 			if (untracked_state == GIT_ITERATOR_STATUS_IGNORED ||
 				untracked_state == GIT_ITERATOR_STATUS_EMPTY) {
 				delta_type = GIT_DELTA_IGNORED;
 
-				if (DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED))
+				if (DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED)) {
+					git__free(path_copy);
 					return 0;
+				}
 			}
 
-			return diff_delta__from_one(diff, delta_type, NULL, &entry);
+			error = diff_delta__from_one(diff, delta_type, NULL, &entry);
+			git__free(path_copy);
+			return error;
 		}
 
 		/* try to advance into directory if necessary */
