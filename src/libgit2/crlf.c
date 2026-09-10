@@ -232,6 +232,15 @@ static int crlf_apply_to_odb(
 			return GIT_PASSTHROUGH;
 
 		/*
+		 * No CRs means nothing to convert, so the only thing left that
+		 * could change the outcome is a safecrlf complaint. Without one
+		 * we can skip has_cr_in_index(), which reads the file's blob out
+		 * of the odb; with `* text=auto` that's a pack read per file.
+		 */
+		if (!stats.crlf && !ca->safe_crlf)
+			return GIT_PASSTHROUGH;
+
+		/*
 		 * If the file in the index has any CR in it, do not convert.
 		 * This is the new safer autocrlf handling.
 		 */
