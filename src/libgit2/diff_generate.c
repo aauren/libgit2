@@ -33,6 +33,9 @@ typedef struct {
 
 	uint32_t diffcaps;
 	bool index_updated;
+	/* GIT_DIFF_EXEMPLARS: bit (status + 1) set once the callback asked us to
+	 * stop producing deltas with that status */
+	uint32_t seen_delta_types;
 } git_diff_generated;
 
 static git_diff_delta *diff_delta__alloc(
@@ -78,13 +81,27 @@ static int diff_insert_delta(
 		error = diff->base.opts.notify_cb(
 			&diff->base, delta, matched_pathspec, diff->base.opts.payload);
 
-		if (error) {
+		if (error < 0) {	/* negative value means to cancel diff */
 			git__free(delta);
+			return git_error_set_after_callback_function(error, "git_diff");
+		}
 
-			if (error > 0)	/* positive value means to skip this delta */
+		if (DIFF_FLAG_IS_SET(diff, GIT_DIFF_EXEMPLARS)) {
+			if (error & GIT_DIFF_DELTA_SKIP_TYPE) {
+				diff->seen_delta_types |= 1u << (delta->status + 1);
+				/* an optimization; other statuses could get the same
+				 * treatment, untracked is the one that costs a walk */
+				if (delta->status == GIT_DELTA_UNTRACKED)
+					diff->base.opts.flags &=
+						~(GIT_DIFF_INCLUDE_UNTRACKED | GIT_DIFF_RECURSE_UNTRACKED_DIRS);
+			}
+			if (error & GIT_DIFF_DELTA_DO_NOT_INSERT) {
+				git__free(delta);
 				return 0;
-			else			/* negative value means to cancel diff */
-				return git_error_set_after_callback_function(error, "git_diff");
+			}
+		} else if (error) {	/* positive value means to skip this delta */
+			git__free(delta);
+			return 0;
 		}
 	}
 
@@ -92,6 +109,12 @@ static int diff_insert_delta(
 		git__free(delta);
 
 	return error;
+}
+
+GIT_INLINE(bool) diff_delta_type_skipped(git_diff_generated *diff, git_delta_t status)
+{
+	return DIFF_FLAG_IS_SET(diff, GIT_DIFF_EXEMPLARS) &&
+		(diff->seen_delta_types & (1u << (status + 1))) != 0;
 }
 
 static bool diff_pathspec_match(
@@ -167,6 +190,9 @@ static int diff_delta__from_one(
 	if ((entry->flags & GIT_INDEX_ENTRY_VALID) != 0)
 		return 0;
 
+	if (diff_delta_type_skipped(diff, status))
+		return 0;
+
 	if (status == GIT_DELTA_IGNORED &&
 		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_IGNORED))
 		return 0;
@@ -234,6 +260,9 @@ static int diff_delta__from_two(
 	git_oid_t oid_type;
 
 	oid_type = diff->base.opts.oid_type;
+
+	if (diff_delta_type_skipped(diff, status))
+		return 0;
 
 	if (status == GIT_DELTA_UNMODIFIED &&
 		DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_UNMODIFIED))
