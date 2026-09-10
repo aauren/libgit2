@@ -271,19 +271,20 @@ static int config_file_iterator(
 	struct git_config_backend *backend)
 {
 	config_file_backend *b = GIT_CONTAINER_OF(backend, config_file_backend, parent);
-	git_config_list *dupped = NULL, *config_list = NULL;
+	git_config_list *config_list = NULL;
 	int error;
 
+	/* A published list is never modified in place (set / delete build a new
+	 * one and swap it in), and the iterator takes its own reference, so we
+	 * can iterate the live list rather than copy it. That matters because
+	 * every git_config_snapshot() goes through here for each backend. */
 	if ((error = config_file_refresh(backend)) < 0 ||
 	    (error = config_file_take_list(&config_list, b)) < 0 ||
-	    (error = git_config_list_dup(&dupped, config_list)) < 0 ||
-	    (error = git_config_list_iterator_new(iter, dupped)) < 0)
+	    (error = git_config_list_iterator_new(iter, config_list)) < 0)
 		goto out;
 
 out:
-	/* Let iterator delete duplicated config_list when it's done */
 	git_config_list_free(config_list);
-	git_config_list_free(dupped);
 	return error;
 }
 
