@@ -320,18 +320,18 @@ int git_odb_new_ext(git_odb **out, const git_odb_options *opts)
 
 	normalize_options(&db->options, opts);
 
-	if (git_mutex_init(&db->lock) < 0) {
+	if (git_rwlock_init(&db->lock) < 0) {
 		git__free(db);
 		return -1;
 	}
 	if (git_cache_init(&db->own_cache) < 0) {
-		git_mutex_free(&db->lock);
+		git_rwlock_free(&db->lock);
 		git__free(db);
 		return -1;
 	}
 	if (git_vector_init(&db->backends, 4, backend_sort_cmp) < 0) {
 		git_cache_dispose(&db->own_cache);
-		git_mutex_free(&db->lock);
+		git_rwlock_free(&db->lock);
 		git__free(db);
 		return -1;
 	}
@@ -368,18 +368,18 @@ static int add_backend_internal(
 	internal->is_alternate = is_alternate;
 	internal->disk_inode = disk_inode;
 
-	if (git_mutex_lock(&odb->lock) < 0) {
+	if (git_rwlock_wrlock(&odb->lock) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return -1;
 	}
 	if (git_vector_insert(&odb->backends, internal) < 0) {
-		git_mutex_unlock(&odb->lock);
+		git_rwlock_wrunlock(&odb->lock);
 		git__free(internal);
 		return -1;
 	}
 	git_vector_sort(&odb->backends);
 	internal->backend->odb = odb;
-	git_mutex_unlock(&odb->lock);
+	git_rwlock_wrunlock(&odb->lock);
 	return 0;
 }
 
@@ -400,13 +400,13 @@ size_t git_odb_num_backends(git_odb *odb)
 
 	GIT_ASSERT_ARG(odb);
 
-	if (git_mutex_lock(&odb->lock) < 0) {
+	if (git_rwlock_rdlock(&odb->lock) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		locked = false;
 	}
 	length = odb->backends.length;
 	if (locked)
-		git_mutex_unlock(&odb->lock);
+		git_rwlock_rdunlock(&odb->lock);
 	return length;
 }
 
@@ -427,20 +427,20 @@ int git_odb_get_backend(git_odb_backend **out, git_odb *odb, size_t pos)
 	GIT_ASSERT_ARG(odb);
 
 
-	if ((error = git_mutex_lock(&odb->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&odb->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
 	internal = git_vector_get(&odb->backends, pos);
 
 	if (!internal || !internal->backend) {
-		git_mutex_unlock(&odb->lock);
+		git_rwlock_rdunlock(&odb->lock);
 
 		git_error_set(GIT_ERROR_ODB, "no ODB backend loaded at index %" PRIuZ, pos);
 		return GIT_ENOTFOUND;
 	}
 	*out = internal->backend;
-	git_mutex_unlock(&odb->lock);
+	git_rwlock_rdunlock(&odb->lock);
 
 	return 0;
 }
@@ -475,18 +475,18 @@ int git_odb__add_default_backends(
 
 	inode = st.st_ino;
 
-	if (git_mutex_lock(&db->lock) < 0) {
+	if (git_rwlock_wrlock(&db->lock) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return -1;
 	}
 	for (i = 0; i < db->backends.length; ++i) {
 		backend_internal *backend = git_vector_get(&db->backends, i);
 		if (backend->disk_inode == inode) {
-			git_mutex_unlock(&db->lock);
+			git_rwlock_wrunlock(&db->lock);
 			return 0;
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 #endif
 
 	if (db->do_fsync)
@@ -507,16 +507,16 @@ int git_odb__add_default_backends(
 	if (add_backend_internal(db, packed, git_odb__packed_priority, as_alternates, inode) < 0)
 		return -1;
 
-	if (git_mutex_lock(&db->lock) < 0) {
+	if (git_rwlock_wrlock(&db->lock) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return -1;
 	}
 	if (!db->cgraph &&
 	    git_commit_graph_new(&db->cgraph, objects_dir, false, db->options.oid_type) < 0) {
-		git_mutex_unlock(&db->lock);
+		git_rwlock_wrunlock(&db->lock);
 		return -1;
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 
 	return load_alternates(db, objects_dir, alternate_depth);
 }
@@ -581,13 +581,13 @@ int git_odb_set_commit_graph(git_odb *odb, git_commit_graph *cgraph)
 
 	GIT_ASSERT_ARG(odb);
 
-	if ((error = git_mutex_lock(&odb->lock)) < 0) {
+	if ((error = git_rwlock_wrlock(&odb->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the db lock");
 		return error;
 	}
 	git_commit_graph_free(odb->cgraph);
 	odb->cgraph = cgraph;
-	git_mutex_unlock(&odb->lock);
+	git_rwlock_wrunlock(&odb->lock);
 
 	return error;
 }
@@ -645,7 +645,7 @@ static void odb_free(git_odb *db)
 	size_t i;
 	bool locked = true;
 
-	if (git_mutex_lock(&db->lock) < 0) {
+	if (git_rwlock_wrlock(&db->lock) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		locked = false;
 	}
@@ -658,12 +658,12 @@ static void odb_free(git_odb *db)
 		git__free(internal);
 	}
 	if (locked)
-		git_mutex_unlock(&db->lock);
+		git_rwlock_wrunlock(&db->lock);
 
 	git_commit_graph_free(db->cgraph);
 	git_vector_dispose(&db->backends);
 	git_cache_dispose(&db->own_cache);
-	git_mutex_free(&db->lock);
+	git_rwlock_free(&db->lock);
 
 	git__memzero(db, sizeof(*db));
 	git__free(db);
@@ -686,7 +686,7 @@ static int odb_exists_1(
 	bool found = false;
 	int error;
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -700,7 +700,7 @@ static int odb_exists_1(
 		if (b->exists != NULL)
 			found = (bool)b->exists(b, id);
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_rdunlock(&db->lock);
 
 	return (int)found;
 }
@@ -710,7 +710,7 @@ int git_odb__get_commit_graph_file(git_commit_graph_file **out, git_odb *db)
 	int error = 0;
 	git_commit_graph_file *result = NULL;
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the db lock");
 		return error;
 	}
@@ -724,7 +724,7 @@ int git_odb__get_commit_graph_file(git_commit_graph_file **out, git_odb *db)
 	*out = result;
 
 done:
-	git_mutex_unlock(&db->lock);
+	git_rwlock_rdunlock(&db->lock);
 	return error;
 }
 
@@ -737,7 +737,7 @@ static int odb_freshen_1(
 	bool found = false;
 	int error;
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_wrlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -753,7 +753,7 @@ static int odb_freshen_1(
 		else if (b->exists != NULL)
 			found = b->exists(b, id);
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 
 	return (int)found;
 }
@@ -810,7 +810,7 @@ static int odb_exists_prefix_1(git_oid *out, git_odb *db,
 	int error = GIT_ENOTFOUND, num_found = 0;
 	git_oid last_found = GIT_OID_NONE, found;
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -829,14 +829,14 @@ static int odb_exists_prefix_1(git_oid *out, git_odb *db,
 		if (error == GIT_ENOTFOUND || error == GIT_PASSTHROUGH)
 			continue;
 		if (error) {
-			git_mutex_unlock(&db->lock);
+			git_rwlock_rdunlock(&db->lock);
 			return error;
 		}
 
 		/* make sure found item doesn't introduce ambiguity */
 		if (num_found) {
 			if (git_oid__cmp(&last_found, &found)) {
-				git_mutex_unlock(&db->lock);
+				git_rwlock_rdunlock(&db->lock);
 				return git_odb__error_ambiguous("multiple matches for prefix");
 			}
 		} else {
@@ -844,7 +844,7 @@ static int odb_exists_prefix_1(git_oid *out, git_odb *db,
 			num_found++;
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_rdunlock(&db->lock);
 
 	if (!num_found)
 		return GIT_ENOTFOUND;
@@ -988,7 +988,7 @@ static int odb_read_header_1(
 		return 0;
 	}
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1013,11 +1013,11 @@ static int odb_read_header_1(
 		case GIT_ENOTFOUND:
 			break;
 		default:
-			git_mutex_unlock(&db->lock);
+			git_rwlock_rdunlock(&db->lock);
 			return error;
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_rdunlock(&db->lock);
 
 	return passthrough ? GIT_PASSTHROUGH : GIT_ENOTFOUND;
 }
@@ -1093,7 +1093,7 @@ static int odb_read_1(
 			return error;
 	}
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1110,14 +1110,14 @@ static int odb_read_1(
 				continue;
 
 			if (error < 0) {
-				git_mutex_unlock(&db->lock);
+				git_rwlock_rdunlock(&db->lock);
 				return error;
 			}
 
 			found = true;
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_rdunlock(&db->lock);
 
 	if (!found)
 		return GIT_ENOTFOUND;
@@ -1216,7 +1216,7 @@ static int read_prefix_1(git_odb_object **out, git_odb *db,
 	bool found = false;
 	git_odb_object *object;
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1237,7 +1237,7 @@ static int read_prefix_1(git_odb_object **out, git_odb *db,
 			}
 
 			if (error) {
-				git_mutex_unlock(&db->lock);
+				git_rwlock_rdunlock(&db->lock);
 				goto out;
 			}
 
@@ -1259,7 +1259,7 @@ static int read_prefix_1(git_odb_object **out, git_odb *db,
 
 				error = git_odb__error_ambiguous(buf.ptr);
 				git_str_dispose(&buf);
-				git_mutex_unlock(&db->lock);
+				git_rwlock_rdunlock(&db->lock);
 				goto out;
 			}
 
@@ -1267,7 +1267,7 @@ static int read_prefix_1(git_odb_object **out, git_odb *db,
 			found = true;
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_rdunlock(&db->lock);
 
 	if (!found)
 		return GIT_ENOTFOUND;
@@ -1340,6 +1340,7 @@ int git_odb_read_prefix(
 	return error;
 }
 
+/* exclusive: backends refresh their pack lists in foreach */
 int git_odb_foreach(git_odb *db, git_odb_foreach_cb cb, void *payload)
 {
 	unsigned int i;
@@ -1348,12 +1349,12 @@ int git_odb_foreach(git_odb *db, git_odb_foreach_cb cb, void *payload)
 	int error = 0;
 
 	/* Make a copy of the backends vector to invoke the callback without holding the lock. */
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_wrlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		goto cleanup;
 	}
 	error = git_vector_dup(&backends, &db->backends, NULL);
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 
 	if (error < 0)
 		goto cleanup;
@@ -1394,7 +1395,7 @@ int git_odb_write(
 	if (git_odb__freshen(db, oid))
 		return 0;
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_wrlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1409,7 +1410,7 @@ int git_odb_write(
 		if (b->write != NULL)
 			error = b->write(b, oid, data, len, type);
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 
 	if (!error || error == GIT_PASSTHROUGH)
 		return 0;
@@ -1451,7 +1452,7 @@ int git_odb_open_wstream(
 	GIT_ASSERT_ARG(stream);
 	GIT_ASSERT_ARG(db);
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_wrlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1472,7 +1473,7 @@ int git_odb_open_wstream(
 			error = init_fake_wstream(stream, b, size, type);
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 
 	if (error < 0) {
 		if (error == GIT_PASSTHROUGH)
@@ -1573,7 +1574,7 @@ int git_odb_open_rstream(
 	GIT_ASSERT_ARG(stream);
 	GIT_ASSERT_ARG(db);
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_rdlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1587,7 +1588,7 @@ int git_odb_open_rstream(
 			error = b->readstream(stream, len, type, b, oid);
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_rdunlock(&db->lock);
 
 	if (error == GIT_PASSTHROUGH)
 		error = 0;
@@ -1605,7 +1606,7 @@ int git_odb_write_pack(struct git_odb_writepack **out, git_odb *db, git_indexer_
 	GIT_ASSERT_ARG(out);
 	GIT_ASSERT_ARG(db);
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_wrlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1623,7 +1624,7 @@ int git_odb_write_pack(struct git_odb_writepack **out, git_odb *db, git_indexer_
 			error = b->writepack(out, b, db, progress_cb, progress_payload);
 		}
 	}
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 
 	if (error == GIT_PASSTHROUGH)
 		error = 0;
@@ -1688,7 +1689,7 @@ int git_odb_refresh(git_odb *db)
 
 	GIT_ASSERT_ARG(db);
 
-	if ((error = git_mutex_lock(&db->lock)) < 0) {
+	if ((error = git_rwlock_wrlock(&db->lock)) < 0) {
 		git_error_set(GIT_ERROR_ODB, "failed to acquire the odb lock");
 		return error;
 	}
@@ -1699,14 +1700,14 @@ int git_odb_refresh(git_odb *db)
 		if (b->refresh != NULL) {
 			int error = b->refresh(b);
 			if (error < 0) {
-				git_mutex_unlock(&db->lock);
+				git_rwlock_wrunlock(&db->lock);
 				return error;
 			}
 		}
 	}
 	if (db->cgraph)
 		git_commit_graph_refresh(db->cgraph);
-	git_mutex_unlock(&db->lock);
+	git_rwlock_wrunlock(&db->lock);
 
 	return 0;
 }

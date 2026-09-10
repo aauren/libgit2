@@ -46,7 +46,9 @@ struct git_odb_object {
 /* EXPORT */
 struct git_odb {
 	git_refcount rc;
-	git_mutex lock;  /* protects backends */
+	/* protects backends: held shared by object reads so they can run in
+	 * parallel, exclusive by anything that adds, refreshes or frees them */
+	git_rwlock lock;
 	git_odb_options options;
 	git_vector backends;
 	git_cache own_cache;
