@@ -75,6 +75,8 @@ void test_index_tests__initialize(void)
 void test_index_tests__cleanup(void)
 {
 	cl_git_pass(git_libgit2_opts(GIT_OPT_ENABLE_UNSAVED_INDEX_SAFETY, 0));
+	cl_git_pass(git_libgit2_opts(GIT_OPT_DISABLE_INDEX_CHECKSUM_VERIFICATION, 0));
+	cl_git_pass(git_libgit2_opts(GIT_OPT_DISABLE_INDEX_FILEPATH_VALIDATION, 0));
 }
 
 void test_index_tests__empty_index(void)
@@ -1001,6 +1003,40 @@ void test_index_tests__reload_from_disk(void)
 	git_index_free(read_index);
 	git_index_free(write_index);
 	git_repository_free(repo);
+}
+
+void test_index_tests__checksum_verification_can_be_disabled(void)
+{
+	git_index *index;
+	git_str buf = GIT_STR_INIT;
+	unsigned char computed[GIT_OID_SHA1_SIZE];
+	const unsigned char *footer;
+
+	cl_fixture_sandbox("testrepo.git");
+	cl_git_pass(git_futils_readbuffer(&buf, "testrepo.git/index"));
+
+	/* record the real checksum, then corrupt the footer */
+	cl_git_pass(git_index_open(&index, "testrepo.git/index"));
+	memcpy(computed, git_index__checksum(index), GIT_OID_SHA1_SIZE);
+	git_index_free(index);
+
+	buf.ptr[buf.size - 1] ^= 0xff;
+	cl_git_write2file("testrepo.git/index", buf.ptr, buf.size, O_WRONLY|O_TRUNC, 0644);
+	footer = (const unsigned char *)buf.ptr + buf.size - GIT_OID_SHA1_SIZE;
+
+	cl_git_fail_with(git_index_open(&index, "testrepo.git/index"), GIT_ERROR);
+
+	cl_git_pass(git_libgit2_opts(GIT_OPT_DISABLE_INDEX_CHECKSUM_VERIFICATION, 1));
+	cl_git_pass(git_index_open(&index, "testrepo.git/index"));
+	cl_assert_equal_i(index_entry_count, git_index_entrycount(index));
+
+	/* with verification off, the (corrupt) footer is what we report */
+	cl_assert(memcmp(footer, git_index__checksum(index), GIT_OID_SHA1_SIZE) == 0);
+	cl_assert(memcmp(computed, git_index__checksum(index), GIT_OID_SHA1_SIZE) != 0);
+
+	git_index_free(index);
+	git_str_dispose(&buf);
+	cl_fixture_cleanup("testrepo.git");
 }
 
 void test_index_tests__corrupted_extension(void)

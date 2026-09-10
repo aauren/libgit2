@@ -269,7 +269,9 @@ typedef enum {
 	GIT_OPT_GET_USER_AGENT_PRODUCT,
 	GIT_OPT_ADD_SSL_X509_CERT,
 	GIT_OPT_GET_PACK_MAX_OBJECT_SIZE,
-	GIT_OPT_SET_PACK_MAX_OBJECT_SIZE
+	GIT_OPT_SET_PACK_MAX_OBJECT_SIZE,
+	GIT_OPT_DISABLE_INDEX_CHECKSUM_VERIFICATION,
+	GIT_OPT_DISABLE_INDEX_FILEPATH_VALIDATION
 } git_libgit2_opt_t;
 
 /**
@@ -583,6 +585,17 @@ typedef enum {
  *      > Set the maximum size of an object that libgit2 will allow in
  *      > a pack file when downloading a pack file from a remote.
  *      > The default is 2 GiB.
+ *
+ *   opts(GIT_OPT_DISABLE_INDEX_CHECKSUM_VERIFICATION, int enabled)
+ *
+ *      > Skip hashing the index file when it's read and trust the
+ *      > checksum in its footer instead. Off by default.
+ *
+ *   opts(GIT_OPT_DISABLE_INDEX_FILEPATH_VALIDATION, int enabled)
+ *
+ *      > Skip validating the paths of entries read from an existing
+ *      > index file (`.git`, `..`, and platform-specific rejects). Paths
+ *      > added to the index are always validated. Off by default.
  *
  * @param option Option key
  * @return 0 on success, <0 on failure

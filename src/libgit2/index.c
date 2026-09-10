@@ -125,6 +125,8 @@ struct reuc_entry_internal {
 };
 
 bool git_index__enforce_unsaved_safety = false;
+bool git_index__disable_checksum_verification = false;
+bool git_index__disable_filepath_validation = false;
 
 /* local declarations */
 static int read_extension(size_t *read_len, git_index *index, size_t checksum_size, const char *buffer, size_t buffer_size);
@@ -956,34 +958,28 @@ static void index_entry_adjust_namemask(
 		entry->flags |= GIT_INDEX_ENTRY_NAMEMASK;
 }
 
-/* When `from_workdir` is true, we will validate the paths to avoid placing
- * paths that are invalid for the working directory on the current filesystem
- * (eg, on Windows, we will disallow `GIT~1`, `AUX`, `COM1`, etc).  This
- * function will *always* prevent `.git` and directory traversal `../` from
- * being added to the index.
+/* `path_valid_flags` selects which path checks to apply. Callers adding
+ * from the working directory pass GIT_PATH_REJECT_WORKDIR_DEFAULTS on top
+ * of GIT_PATH_REJECT_INDEX_DEFAULTS (eg, on Windows, disallow `GIT~1`,
+ * `AUX`, `COM1`, etc). Zero skips validation entirely, which is only used
+ * when reading an existing index with filepath validation disabled.
  */
 static int index_entry_create(
 	git_index_entry **out,
 	git_repository *repo,
 	const char *path,
 	struct stat *st,
-	bool from_workdir)
+	unsigned int path_valid_flags)
 {
 	size_t pathlen = strlen(path), alloclen;
 	struct entry_internal *entry;
-	unsigned int path_valid_flags = GIT_PATH_REJECT_INDEX_DEFAULTS;
 	uint16_t mode = 0;
 
-	/* always reject placing `.git` in the index and directory traversal.
-	 * when requested, disallow platform-specific filenames and upgrade to
-	 * the platform-specific `.git` tests (eg, `git~1`, etc).
-	 */
-	if (from_workdir)
-		path_valid_flags |= GIT_PATH_REJECT_WORKDIR_DEFAULTS;
 	if (st)
 		mode = st->st_mode;
 
-	if (!git_path_is_valid(repo, path, mode, path_valid_flags)) {
+	if (path_valid_flags &&
+	    !git_path_is_valid(repo, path, mode, path_valid_flags)) {
 		git_error_set(GIT_ERROR_INDEX, "invalid path: '%s'", path);
 		return -1;
 	}
@@ -1036,7 +1032,8 @@ static int index_entry_init(
 	if (error < 0)
 		return error;
 
-	if (index_entry_create(&entry, INDEX_OWNER(index), rel_path, &st, true) < 0)
+	if (index_entry_create(&entry, INDEX_OWNER(index), rel_path, &st,
+		GIT_PATH_REJECT_INDEX_DEFAULTS | GIT_PATH_REJECT_WORKDIR_DEFAULTS) < 0)
 		return -1;
 
 	/* write the blob to disk and get the oid and stat info */
@@ -1123,7 +1120,8 @@ static int index_entry_dup(
 	git_index *index,
 	const git_index_entry *src)
 {
-	if (index_entry_create(out, INDEX_OWNER(index), src->path, NULL, false) < 0)
+	if (index_entry_create(out, INDEX_OWNER(index), src->path, NULL,
+		GIT_PATH_REJECT_INDEX_DEFAULTS) < 0)
 		return -1;
 
 	index_entry_cpy(*out, src);
@@ -1145,7 +1143,8 @@ static int index_entry_dup_nocache(
 	git_index *index,
 	const git_index_entry *src)
 {
-	if (index_entry_create(out, INDEX_OWNER(index), src->path, NULL, false) < 0)
+	if (index_entry_create(out, INDEX_OWNER(index), src->path, NULL,
+		GIT_PATH_REJECT_INDEX_DEFAULTS) < 0)
 		return -1;
 
 	index_entry_cpy_nocache(*out, src);
@@ -1582,7 +1581,8 @@ static int add_repo_as_submodule(git_index_entry **out, git_index *index, const 
 		return -1;
 	}
 
-	if (index_entry_create(&entry, INDEX_OWNER(index), path, &st, true) < 0)
+	if (index_entry_create(&entry, INDEX_OWNER(index), path, &st,
+		GIT_PATH_REJECT_INDEX_DEFAULTS | GIT_PATH_REJECT_WORKDIR_DEFAULTS) < 0)
 		return -1;
 
 	git_index_entry__init_from_stat(entry, &st, !index->distrust_filemode);
@@ -2765,11 +2765,13 @@ static int read_entry(
 		return -1;
 	}
 
-	if (index_entry_dup(out, index, &entry) < 0) {
+	if (index_entry_create(out, INDEX_OWNER(index), entry.path, NULL,
+			git_index__disable_filepath_validation ? 0 : GIT_PATH_REJECT_INDEX_DEFAULTS) < 0) {
 		git__free(tmp_path);
 		return -1;
 	}
 
+	index_entry_cpy(*out, &entry);
 	git__free(tmp_path);
 	*out_size = entry_size;
 	return 0;
@@ -2870,10 +2872,18 @@ static int parse_index(git_index *index, const char *buffer, size_t buffer_size)
 
 	/*
 	 * Precalculate the hash of the files's contents -- we'll match
-	 * it to the provided checksum in the footer.
+	 * it to the provided checksum in the footer. When the caller has
+	 * opted out of verification we skip this full pass over the file
+	 * and trust the footer instead, unless the footer is all zeros
+	 * (index.skipHash), where we still need a real hash for
+	 * git_index_checksum() to mean anything.
 	 */
-	git_hash_buf(checksum, buffer, buffer_size - checksum_size,
-		git_oid_algorithm(index->oid_type));
+	if (!git_index__disable_checksum_verification ||
+	    memcmp(zero_checksum, buffer + buffer_size - checksum_size, checksum_size) == 0)
+		git_hash_buf(checksum, buffer, buffer_size - checksum_size,
+			git_oid_algorithm(index->oid_type));
+	else
+		memcpy(checksum, buffer + buffer_size - checksum_size, checksum_size);
 
 	/* Parse header */
 	if ((error = read_header(&header, buffer)) < 0)
@@ -2945,7 +2955,8 @@ static int parse_index(git_index *index, const char *buffer, size_t buffer_size)
 	 * Note: checksum may be 0 if the index was written by a client
 	 * where index.skipHash was set to true.
 	 */
-	if (memcmp(zero_checksum, buffer, checksum_size) != 0 &&
+	if (!git_index__disable_checksum_verification &&
+	    memcmp(zero_checksum, buffer, checksum_size) != 0 &&
 	    memcmp(checksum, buffer, checksum_size) != 0) {
 		error = index_error_invalid(
 			"calculated checksum does not match expected");
@@ -3427,7 +3438,8 @@ static int read_tree_cb(
 	if (git_str_joinpath(&path, root, tentry->filename) < 0)
 		return -1;
 
-	if (index_entry_create(&entry, INDEX_OWNER(data->index), path.ptr, NULL, false) < 0)
+	if (index_entry_create(&entry, INDEX_OWNER(data->index), path.ptr, NULL,
+		GIT_PATH_REJECT_INDEX_DEFAULTS) < 0)
 		return -1;
 
 	entry->mode = tentry->attr;
