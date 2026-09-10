@@ -205,6 +205,15 @@ int git_sortedcache_lockandload(git_sortedcache *sc, git_str *buf)
 	int error, fd;
 	struct stat st;
 
+	/* Cheap read-locked check first, so that the common "nothing changed"
+	 * case doesn't serialize every reader behind the write lock. */
+	if ((error = git_sortedcache_rlock(sc)) < 0)
+		return error;
+	error = git_futils_filestamp_check_readonly(&sc->stamp, sc->path);
+	git_sortedcache_runlock(sc);
+	if (error <= 0)
+		return error;
+
 	if ((error = git_sortedcache_wlock(sc)) < 0)
 		return error;
 

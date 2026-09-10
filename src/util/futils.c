@@ -218,11 +218,12 @@ int git_futils_readbuffer_fd_full(git_str *buf, git_file fd)
 	return 0;
 }
 
-int git_futils_readbuffer_updated(
+static int readbuffer_updated(
 	git_str *out,
 	const char *path,
 	unsigned char checksum[GIT_HASH_SHA256_SIZE],
-	int *updated)
+	int *updated,
+	bool quiet)
 {
 	int error;
 	git_file fd;
@@ -236,8 +237,13 @@ int git_futils_readbuffer_updated(
 	if (updated != NULL)
 		*updated = 0;
 
-	if (p_stat(path, &st) < 0)
+	if (p_stat(path, &st) < 0) {
+		/* formatting the error is measurable when probing for loose
+		 * refs that mostly don't exist, so callers can opt out */
+		if (quiet && errno == ENOENT)
+			return GIT_ENOTFOUND;
 		return git_fs_path_set_error(errno, path, "stat");
+	}
 
 
 	if (S_ISDIR(st.st_mode)) {
@@ -295,9 +301,23 @@ int git_futils_readbuffer_updated(
 	return 0;
 }
 
+int git_futils_readbuffer_updated(
+	git_str *out,
+	const char *path,
+	unsigned char checksum[GIT_HASH_SHA256_SIZE],
+	int *updated)
+{
+	return readbuffer_updated(out, path, checksum, updated, false);
+}
+
 int git_futils_readbuffer(git_str *buf, const char *path)
 {
-	return git_futils_readbuffer_updated(buf, path, NULL, NULL);
+	return readbuffer_updated(buf, path, NULL, NULL, false);
+}
+
+int git_futils_readbuffer_quiet(git_str *buf, const char *path)
+{
+	return readbuffer_updated(buf, path, NULL, NULL, true);
 }
 
 int git_futils_writebuffer(
