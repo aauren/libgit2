@@ -381,6 +381,16 @@ extern int git_futils_filestamp_check(
 	git_futils_filestamp *stamp, const char *path);
 
 /**
+ * Same check as `git_futils_filestamp_check` but never writes the stamp,
+ * so it's safe on a stamp shared between threads (eg, a cached attr file).
+ * Callers that decide to reload must set the stamp on their own copy.
+ *
+ * @return 0 if up-to-date, 1 if out-of-date, GIT_ENOTFOUND if cannot stat
+ */
+extern int git_futils_filestamp_check_readonly(
+	const git_futils_filestamp *stamp, const char *path);
+
+/**
  * Set or reset file stamp data
  *
  * This writes the target file stamp.  If the source is NULL, this will set

@@ -1145,6 +1145,32 @@ int git_futils_cp_r(
 	return error;
 }
 
+static bool filestamp_matches(
+	const git_futils_filestamp *stamp, const struct stat *st)
+{
+	return stamp->mtime.tv_sec == st->st_mtime &&
+#if defined(GIT_NSEC)
+		stamp->mtime.tv_nsec == st->st_mtime_nsec &&
+#endif
+		stamp->size  == (uint64_t)st->st_size   &&
+		stamp->ino   == (unsigned int)st->st_ino;
+}
+
+int git_futils_filestamp_check_readonly(
+	const git_futils_filestamp *stamp, const char *path)
+{
+	struct stat st;
+
+	/* if the stamp is NULL, then always reload */
+	if (stamp == NULL)
+		return 1;
+
+	if (p_stat(path, &st) < 0)
+		return GIT_ENOTFOUND;
+
+	return filestamp_matches(stamp, &st) ? 0 : 1;
+}
+
 int git_futils_filestamp_check(
 	git_futils_filestamp *stamp, const char *path)
 {
@@ -1157,12 +1183,7 @@ int git_futils_filestamp_check(
 	if (p_stat(path, &st) < 0)
 		return GIT_ENOTFOUND;
 
-	if (stamp->mtime.tv_sec == st.st_mtime &&
-#if defined(GIT_NSEC)
-		stamp->mtime.tv_nsec == st.st_mtime_nsec &&
-#endif
-		stamp->size  == (uint64_t)st.st_size   &&
-		stamp->ino   == (unsigned int)st.st_ino)
+	if (filestamp_matches(stamp, &st))
 		return 0;
 
 	stamp->mtime.tv_sec = st.st_mtime;
