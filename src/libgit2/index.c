@@ -665,13 +665,16 @@ const git_oid *git_index_checksum(git_index *index)
 #endif
 
 /**
- * Returns 1 for changed, 0 for not changed and <0 for errors
+ * Returns 1 for changed, 0 for not changed and <0 for errors. An all-zero
+ * footer (index.skipHash) carries no information, so that's "not changed"
+ * here and the filestamp has to decide.
  */
 static int compare_checksum(git_index *index)
 {
 	int fd;
 	ssize_t bytes_read;
 	unsigned char checksum[GIT_HASH_MAX_SIZE];
+	unsigned char zero_checksum[GIT_HASH_MAX_SIZE] = { 0 };
 	size_t checksum_size = git_oid_size(index->oid_type);
 
 	if ((fd = p_open(index->index_file_path, O_RDONLY)) < 0)
@@ -688,6 +691,9 @@ static int compare_checksum(git_index *index)
 
 	if (bytes_read < (ssize_t)checksum_size)
 		return -1;
+
+	if (memcmp(checksum, zero_checksum, checksum_size) == 0)
+		return 0;
 
 	return !!memcmp(checksum, index->checksum, checksum_size);
 }
@@ -712,8 +718,19 @@ int git_index_read(git_index *index, int force)
 		return 0;
 	}
 
-	if ((updated = git_futils_filestamp_check(&stamp, index->index_file_path) < 0) ||
-	    ((updated = compare_checksum(index)) < 0)) {
+	/* Reload if either the stamp or the checksum say the file changed. The
+	 * stamp alone is racy within its resolution, the checksum alone can't
+	 * see anything when index.skipHash leaves the footer zeroed. */
+	updated = git_futils_filestamp_check(&stamp, index->index_file_path);
+	if (updated >= 0) {
+		int checksum_changed = compare_checksum(index);
+
+		if (checksum_changed < 0)
+			updated = checksum_changed;
+		else
+			updated = updated || checksum_changed;
+	}
+	if (updated < 0) {
 		git_error_set(
 			GIT_ERROR_INDEX,
 			"failed to read index: '%s' no longer exists",
