@@ -282,7 +282,9 @@ int git_attr_file__out_of_date(
 		return 0;
 
 	case GIT_ATTR_FILE_SOURCE_FILE:
-		return git_futils_filestamp_check(
+		/* the file is shared through the attr cache, so don't write to
+		 * its stamp here; a reload builds a fresh file with a new stamp */
+		return git_futils_filestamp_check_readonly(
 			&file->cache_data.stamp, file->entry->fullpath);
 
 	case GIT_ATTR_FILE_SOURCE_INDEX: {
