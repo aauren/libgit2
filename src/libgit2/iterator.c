@@ -1056,13 +1056,6 @@ typedef struct {
 } filesystem_iterator;
 
 
-GIT_INLINE(filesystem_iterator_frame *) filesystem_iterator_parent_frame(
-	filesystem_iterator *iter)
-{
-	return iter->frames.size > 1 ?
-		&iter->frames.ptr[iter->frames.size-2] : NULL;
-}
-
 GIT_INLINE(filesystem_iterator_frame *) filesystem_iterator_current_frame(
 	filesystem_iterator *iter)
 {

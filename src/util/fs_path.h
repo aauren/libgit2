@@ -524,7 +524,7 @@ struct git_fs_path_diriter
 };
 
 #ifdef GIT_I18N_ICONV
-#define GIT_FS_PATH_DIRITER_INIT { GIT_STR_INIT, 0, 0, NULL, GIT_PATH_ICONV_INIT }
+#define GIT_FS_PATH_DIRITER_INIT { GIT_STR_INIT, 0, 0, NULL, 0, GIT_PATH_ICONV_INIT }
 #else
 #define GIT_FS_PATH_DIRITER_INIT { GIT_STR_INIT }
 #endif
