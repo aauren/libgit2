@@ -1147,22 +1147,22 @@ static void filesystem_iterator_frame_push_ignores(
 	filesystem_iterator_frame *previous_frame,
 	filesystem_iterator_frame *new_frame)
 {
-	const char *path = "";
+	/* the top level directory can't be ignored: git never matches rules
+	 * against the workdir root, and looking up "" would let a bare "*"
+	 * mark the root frame ignored and swallow every negation below it */
+	if (!previous_frame) {
+		new_frame->is_ignored = GIT_IGNORE_NOTFOUND;
+	} else {
+		const char *path, *relative_path;
 
-	if (previous_frame) {
 		path = filesystem_iterator_current_entry(previous_frame)->path;
 		GIT_ASSERT_WITH_CLEANUP(path && *path, return);
-	}
 
-	if (git_ignore__lookup(&new_frame->is_ignored,
-			&iter->ignores, path, GIT_DIR_FLAG_TRUE) < 0) {
-		git_error_clear();
-		new_frame->is_ignored = GIT_IGNORE_NOTFOUND;
-	}
-
-	/* if this is not the top level directory... */
-	if (previous_frame) {
-		const char *relative_path;
+		if (git_ignore__lookup(&new_frame->is_ignored,
+				&iter->ignores, path, GIT_DIR_FLAG_TRUE) < 0) {
+			git_error_clear();
+			new_frame->is_ignored = GIT_IGNORE_NOTFOUND;
+		}
 
 		/* push new ignores for files in this directory */
 		relative_path = path + previous_frame->path_len;

@@ -1361,3 +1361,33 @@ void test_ignore_status__negation_in_nested_ignore_file(void)
 	refute_is_ignored("sub/important.log");
 	refute_is_ignored("sub/deeper/important.log");
 }
+
+/* gitstatus#59 test case 1, without RECURSE_UNTRACKED_DIRS: foo/ has to
+ * show up as untracked because foo/.gitignore re-includes foo/bar. */
+void test_ignore_status__negation_in_nested_ignore_file_star(void)
+{
+	git_repository *repo = cl_git_sandbox_init("empty_standard_repo");
+	git_status_list *statuslist;
+	git_status_options opts = GIT_STATUS_OPTIONS_INIT;
+	const git_status_entry *status;
+
+	cl_git_pass(git_futils_mkdir_r("empty_standard_repo/foo", 0777));
+	cl_git_mkfile("empty_standard_repo/.gitignore", "*\n!foo\n");
+	cl_git_mkfile("empty_standard_repo/foo/.gitignore", "!bar\n");
+	cl_git_mkfile("empty_standard_repo/foo/bar", "pong");
+
+	refute_is_ignored("foo/bar");
+
+	opts.show = GIT_STATUS_SHOW_INDEX_AND_WORKDIR;
+	opts.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED;
+
+	cl_git_pass(git_status_list_new(&statuslist, repo, &opts));
+	cl_assert_equal_sz(1, git_status_list_entrycount(statuslist));
+
+	status = git_status_byindex(statuslist, 0);
+	cl_assert(status != NULL);
+	cl_assert_equal_s("foo/", status->index_to_workdir->old_file.path);
+	cl_assert_equal_i(GIT_STATUS_WT_NEW, status->status);
+
+	git_status_list_free(statuslist);
+}
