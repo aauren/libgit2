@@ -1397,3 +1397,39 @@ void test_status_worktree__intent_to_add(void)
 	cl_git_pass(git_status_file(&status, repo, "ita.txt"));
 	cl_assert_equal_i(GIT_STATUS_WT_NEW, status);
 }
+
+/* A skip-worktree entry is expected to be absent from the workdir, so its
+ * absence isn't a deletion, and a stale copy on disk isn't a modification. */
+void test_status_worktree__skip_worktree_missing(void)
+{
+	git_repository *repo = cl_git_sandbox_init("status");
+	git_index *index;
+	git_index_entry entry;
+	unsigned int status;
+	const git_index_entry *existing;
+
+	cl_git_pass(git_repository_index(&index, repo));
+
+	/* current_file is tracked and clean, mark it skip-worktree and remove it */
+	cl_assert((existing = git_index_get_bypath(index, "current_file", 0)) != NULL);
+	memcpy(&entry, existing, sizeof(entry));
+	entry.flags_extended |= GIT_INDEX_ENTRY_SKIP_WORKTREE;
+	cl_git_pass(git_index_add(index, &entry));
+
+	/* modified_file too, but leave its modified copy on disk */
+	cl_assert((existing = git_index_get_bypath(index, "modified_file", 0)) != NULL);
+	memcpy(&entry, existing, sizeof(entry));
+	entry.flags_extended |= GIT_INDEX_ENTRY_SKIP_WORKTREE;
+	cl_git_pass(git_index_add(index, &entry));
+
+	cl_git_pass(git_index_write(index));
+	git_index_free(index);
+
+	cl_must_pass(p_unlink("status/current_file"));
+
+	cl_git_pass(git_status_file(&status, repo, "current_file"));
+	cl_assert_equal_i(GIT_STATUS_CURRENT, status);
+
+	cl_git_pass(git_status_file(&status, repo, "modified_file"));
+	cl_assert_equal_i(GIT_STATUS_CURRENT, status);
+}

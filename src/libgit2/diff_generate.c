@@ -1250,6 +1250,18 @@ static int handle_unmatched_old_item(
 	if (git_index_entry_is_conflict(info->oitem))
 		delta_type = GIT_DELTA_CONFLICTED;
 
+	/* a skip-worktree entry (sparse checkout) is expected to be missing
+	 * from the workdir, git doesn't report it as deleted. Unlike the
+	 * two-sided path, from_one doesn't filter UNMODIFIED before the
+	 * notify callback, so don't create one unless it was asked for */
+	else if (info->new_iter->type == GIT_ITERATOR_WORKDIR &&
+		(info->oitem->flags_extended & GIT_INDEX_ENTRY_SKIP_WORKTREE) != 0) {
+		if (DIFF_FLAG_ISNT_SET(diff, GIT_DIFF_INCLUDE_UNMODIFIED))
+			return iterator_advance(&info->oitem, info->old_iter);
+
+		delta_type = GIT_DELTA_UNMODIFIED;
+	}
+
 	/* if we are generating TYPECHANGE records then check for that
 	 * instead of just generating a DELETE record
 	 */
